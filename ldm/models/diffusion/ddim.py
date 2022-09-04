@@ -19,11 +19,12 @@ class DDIMSampler(object):
         self.model = model
         self.ddpm_num_timesteps = model.num_timesteps
         self.schedule = schedule
+        self.device = next(model.parameters()).device
 
     def register_buffer(self, name, attr):
         if type(attr) == torch.Tensor:
-            if attr.device != torch.device("cuda"):
-                attr = attr.to(torch.device("cuda"))
+            if attr.device != self.device:
+                attr = attr.to(self.device)
         setattr(self, name, attr)
 
     def make_schedule(
@@ -372,10 +373,13 @@ class DDIMSampler(object):
         return x_dec
 
     @torch.no_grad()
-    def decode(
+    def decode_blm(
         self,
         x_latent,
+        x_clean_latent,
         cond,
+        mask,
+        noise,
         t_start,
         unconditional_guidance_scale=1.0,
         unconditional_conditioning=None,
@@ -394,13 +398,14 @@ class DDIMSampler(object):
         print(f"Running DDIM Sampling with {total_steps} timesteps")
 
         iterator = tqdm(time_range, desc="Decoding image", total=total_steps)
-        x_dec = x_latent
+        x_dec = x_latent.clone()
+        mask = mask.unsqueeze(1).repeat(1, 4, 1, 1)
         for i, step in enumerate(iterator):
             index = total_steps - i - 1
             ts = torch.full(
                 (x_latent.shape[0],), step, device=x_latent.device, dtype=torch.long
             )
-            x_dec, _ = self.p_sample_ddim(
+            z_fg, _ = self.p_sample_ddim(
                 x_dec,
                 cond,
                 ts,
@@ -409,4 +414,13 @@ class DDIMSampler(object):
                 unconditional_guidance_scale=unconditional_guidance_scale,
                 unconditional_conditioning=unconditional_conditioning,
             )
+
+            z_bg = self.stochastic_encode(
+                x_clean_latent,
+                torch.tensor([t_start - i - 1] * x_latent.shape[0]).to(x_latent.device),
+                noise=noise,
+            )
+
+            x_dec = mask * z_fg + (1 - mask) * z_bg
+
         return x_dec
