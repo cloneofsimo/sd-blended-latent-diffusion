@@ -20,12 +20,10 @@ from ldm.models.diffusion.plms import PLMSSampler
 
 from scripts.sd_utils import load_model_from_config, prepare_image, save_batch_images
 import torch.nn as nn
+import torch.nn.functional as F
 
-
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-
-INPAINT_MASK = "/home/simo/dl/lst/stable-diffusion-largesample/data/inpainting_examples/6458524847_2f4c361183_k_mask.png"
-INPAINT_SRC = "/home/simo/dl/lst/stable-diffusion-largesample/data/inpainting_examples/6458524847_2f4c361183_k.png"
+INPAINT_MASK = "./data/inpainting_examples/photo-1583445095369-9c651e7e5d34_mask.png"
+INPAINT_SRC = "./data/inpainting_examples/photo-1583445095369-9c651e7e5d34.png"
 
 
 parser = argparse.ArgumentParser()
@@ -42,7 +40,7 @@ parser.add_argument(
     type=str,
     nargs="?",
     help="dir to write results to",
-    default="outputs/txt2img-samples",
+    default="outputs/blended-latent-diffusion-samples",
 )
 parser.add_argument(
     "--skip_grid",
@@ -161,13 +159,32 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--mask",
+    type=str,
+    help="path to mask",
+    default=INPAINT_MASK,
+)
+
+parser.add_argument(
+    "--src",
+    type=str,
+    help="path to source",
+    default=INPAINT_SRC,
+)
+
+parser.add_argument(
     "--perform",
     type=str,
     help="what to perform : inpaint with prompt,...",
-    choices=["promptless", "bld"],
-    default="promptless",
+    choices=["reconstruct_test", "bld"],
+    default="reconstruct_test",
 )
 
+parser.add_argument(
+    "--invert_mask",
+    action="store_true",
+    help="invert the mask",
+)
 
 opt = parser.parse_args()
 
@@ -175,7 +192,7 @@ opt = parser.parse_args()
 config = OmegaConf.load(f"{opt.config}")
 
 
-def promptless(model, img, mask):
+def reconstruct_test(model, img, mask):
     init_latent = model.get_first_stage_encoding(
         model.encode_first_stage(img)
     )  # move to latent space
@@ -206,16 +223,21 @@ def blended_latent_diffusion(
     c = model.get_learned_conditioning(prompts)
 
     noise = torch.randn_like(init_latent).to(device)
-    # encode (scaled latent)
+
     z_enc = sampler.stochastic_encode(
         init_latent, torch.tensor([t_enc] * batch_size).to(device), noise=noise
     )
-    # decode it
+
+    # resize mask.
+    mask_small = F.interpolate(
+        mask.unsqueeze(0), scale_factor=1 / 8, mode="nearest"
+    ).squeeze(0)
+
     samples = sampler.decode_blm(
         z_enc,
         init_latent,
         c,
-        mask,
+        mask_small,
         noise,
         t_enc,
         unconditional_guidance_scale=opt.scale,
@@ -224,6 +246,15 @@ def blended_latent_diffusion(
 
     x_samples = model.decode_first_stage(samples)
 
+    # blur the mask, ok this is some hacky trick...
+    mask = F.interpolate(mask.unsqueeze(0), scale_factor=1 / 8, mode="bicubic").squeeze(
+        0
+    )
+    mask = F.interpolate(mask.unsqueeze(0), scale_factor=8, mode="bicubic").squeeze(0)
+    mask = mask.clamp(0, 1)
+
+    x_merged = img * (1 - mask) + x_samples * mask
+
     return x_samples
 
 
@@ -231,24 +262,30 @@ if __name__ == "__main__":
 
     device = "cuda:1"
     # prepare image.
-    img, mask = prepare_image(INPAINT_SRC, INPAINT_MASK, opt.H, opt.W)
+    img, mask = prepare_image(opt.src, opt.mask, opt.H, opt.W)
     img = img.to(device)
-    mask = mask.to(device)
 
+    mask = mask.to(device)
+    if opt.invert_mask:
+        mask = 1 - mask
     # prepare model.
     model = load_model_from_config(config, f"{opt.ckpt}", device=device)
     seed_everything(opt.seed)
+    os.makedirs(opt.outdir, exist_ok=True)
 
     if opt.plms:
+        raise NotImplementedError("PLMS not supported... ")  # TODO
         sampler = PLMSSampler(model)
     else:
         sampler = DDIMSampler(model)
 
-    if opt.perform == "promptless":
-        result_img = promptless(model, img, mask)
-    else:
+    if opt.perform == "reconstruct_test":
+        result_img = reconstruct_test(model, img, mask)
+    elif opt.perform == "bld":
         prompt = opt.prompt
-        result_img = blended_latent_diffusion(model, img, mask, sampler, prompt)
+        result_img = blended_latent_diffusion(
+            model, img, mask, sampler, prompt, t_enc=opt.ddim_steps - 1
+        )
 
     # save result.
     save_batch_images(result_img, f"{opt.outdir}/")

@@ -67,9 +67,6 @@ def reshape_image(
     else:
         raise ValueError(f"Unknown mode: {mode}")
 
-    if mask is not None:
-        mask = mask.resize((width // 8, height // 8), Image.BICUBIC)
-
     return img, mask
 
 
