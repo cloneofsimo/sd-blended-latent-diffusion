@@ -13,6 +13,7 @@ Can we use nvFuser to further accelerate Stable diffusion, to go faster than AMP
 
 * `inference_nvFuserJIT.ipynb` will show how to use nvFuser JIT to further accelerate the inference of the model.
 
+![](score.png)
 
 
 
