@@ -1,3 +1,4 @@
 *.png
+!score.png
 *.pyc
 *.pt
