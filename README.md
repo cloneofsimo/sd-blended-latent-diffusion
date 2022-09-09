@@ -1,4 +1,22 @@
-# Blended Latent Diffusion (with Stable Diffusion)
+# Various Ideas Implemented with Stable Diffusion
+
+
+## Accelerating Stable Diffusion Inference with nvFuser JIT Compilation
+
+Quote from [pytorch's tutorial](https://pytorch.org/tutorials/intermediate/nvfuser_intro_tutorial.html)
+
+> nvFuser is a Deep Learning Compiler that just-in-time compiles fast and flexible GPU specific code to reliably accelerate users’ networks automatically, providing speedups for deep learning networks running on Volta and later CUDA accelerators by generating fast custom “fusion” kernels at runtime.
+
+Can we use nvFuser to further accelerate Stable diffusion, to go faster than AMP? Yes! Check out my implementation on how to do it
+
+* `create_jit.ipynb` will create a jit script of the stable diffusion model, and compare performances between AMP, JIT, and JIT + AMP.
+
+* `inference_nvFuserJIT.ipynb` will show how to use nvFuser JIT to further accelerate the inference of the model.
+
+
+
+
+## Blended Latent Diffusion (with Stable Diffusion)
 
 For some reason authors of Blended latent diffusion didn't release their code. So I decided to implement it myself. It (since Stable diffusion is such a famous model) is built on stable diffusion's code.
 
